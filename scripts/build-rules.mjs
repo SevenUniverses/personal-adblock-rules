@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 
 const LISTS = [
   {
@@ -27,29 +28,38 @@ function nowIso() {
 }
 
 async function convertToDnr({ filtersText }) {
-  // abp2dnr exports a CLI and programmatic API. The simplest stable approach
-  // for GitHub Actions is to shell out to its CLI (npx).
-  //
-  // However, we can’t assume node’s child_process is allowed everywhere without
-  // extra complexity, so we use the programmatic API if available.
-  //
-  // abp2dnr’s API surface may evolve; if this fails in CI, use the CLI path.
-  const abp2dnr = await import("@eyeo/abp2dnr");
+  // Use the CLI for stability across @eyeo/abp2dnr versions.
+  // Equivalent to: `cat filters.txt | npx @eyeo/abp2dnr > rules.json`
+  return await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.platform === "win32" ? "npx.cmd" : "npx",
+      ["--yes", "@eyeo/abp2dnr"],
+      { stdio: ["pipe", "pipe", "pipe"] }
+    );
 
-  // API compatibility shim:
-  // - Some versions export `convert` (list → ruleset)
-  // - Others export `convertFilter` (single filter → rules)
-  if (typeof abp2dnr.convert === "function") {
-    return await abp2dnr.convert(filtersText);
-  }
+    let stdout = "";
+    let stderr = "";
 
-  if (typeof abp2dnr.convertFilters === "function") {
-    return await abp2dnr.convertFilters(filtersText);
-  }
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
 
-  throw new Error(
-    "Unsupported @eyeo/abp2dnr API. Update scripts/build-rules.mjs to use the CLI: npx @eyeo/abp2dnr"
-  );
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`abp2dnr failed (exit ${code}).\n${stderr}`.trim()));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        reject(new Error(`Failed to parse abp2dnr output as JSON.\n${stderr}`.trim()));
+      }
+    });
+
+    child.stdin.end(filtersText);
+  });
 }
 
 async function main() {
