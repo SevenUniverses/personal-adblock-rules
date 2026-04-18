@@ -1,0 +1,12 @@
+{
+  "name": "adblocker-rules-github",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:rules": "node scripts/build-rules.mjs"
+  },
+  "dependencies": {
+    "@eyeo/abp2dnr": "^1.3.3"
+  }
+}
+
