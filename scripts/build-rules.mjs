@@ -32,6 +32,7 @@ const LISTS = [
 // Chrome’s DNR dynamic quota is tiered; safe rules can go higher on newer Chrome,
 // but keep a cap to avoid update failures on older/baseline environments.
 const MAX_RULES_OUT = 30000;
+const COSMETICS_OUT_CAP = 500; // keep it small; this is a starter cosmetic layer
 
 async function fetchText(url) {
   const res = await fetch(url, {
@@ -90,6 +91,36 @@ async function main() {
 
   const combined = fetched.map((f) => `! ---- ${f.name} (${f.url}) ----\n${f.text}`).join("\n\n");
 
+  // Very small cosmetic extraction layer:
+  // - Extracts simple `domain##selector` rules only.
+  // - Skips procedural selectors and exception syntax.
+  //
+  // This is intentionally conservative and is meant to scale by improving the
+  // builder, not by doing runtime DOM scanning in the extension.
+  const cosmetics = {};
+  for (const f of fetched) {
+    const lines = f.text.split(/\r?\n/);
+    for (const line of lines) {
+      if (!line || line.startsWith("!") || line.startsWith("[")) continue;
+      if (!line.includes("##")) continue;
+      if (line.includes("#@#")) continue; // exceptions not supported in starter layer
+      const [domainPart, selector] = line.split("##");
+      if (!domainPart || !selector) continue;
+      if (selector.includes(":has(") || selector.includes(":xpath(") || selector.includes(":-abp-")) continue;
+      // Multi-domain entries like a.com,b.com##... are supported.
+      const domains = domainPart.split(",").map((d) => d.trim()).filter(Boolean);
+      for (const d of domains) {
+        if (!/^[a-z0-9.-]+$/i.test(d)) continue;
+        const cssLine = `${selector.trim()} { display: none !important; }`;
+        cosmetics[d] = cosmetics[d] ? `${cosmetics[d]}\n${cssLine}` : cssLine;
+      }
+    }
+  }
+
+  // Cap cosmetics size to avoid huge remote payloads in this starter.
+  const cosmeticEntries = Object.entries(cosmetics).slice(0, COSMETICS_OUT_CAP);
+  const cosmeticsOut = Object.fromEntries(cosmeticEntries);
+
   const ruleset = await convertToDnr({ filtersText: combined });
 
   // Normalize to the shape your extension expects.
@@ -112,6 +143,19 @@ async function main() {
 
   await mkdir("docs", { recursive: true });
   await writeFile("docs/rules.json", JSON.stringify(out, null, 2), "utf8");
+  await writeFile(
+    "docs/cosmetics.json",
+    JSON.stringify(
+      {
+        version: `github-${nowIso()}`,
+        generatedAt: nowIso(),
+        cosmetics: cosmeticsOut
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
   await writeFile("docs/index.html", "<!doctype html><meta charset=utf-8><title>rules</title><pre>rules.json</pre>", "utf8");
 }
 
