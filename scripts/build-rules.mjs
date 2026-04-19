@@ -9,8 +9,29 @@ const LISTS = [
   {
     name: "easyprivacy",
     url: "https://easylist.to/easylist/easyprivacy.txt"
+  },
+  // uBlock Origin public filter lists (ABP-compatible syntax)
+  {
+    name: "ublock-filters",
+    url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"
+  },
+  {
+    name: "ublock-privacy",
+    url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt"
+  },
+  {
+    name: "ublock-badware",
+    url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt"
+  },
+  {
+    name: "ublock-unbreak",
+    url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt"
   }
 ];
+
+// Chrome’s DNR dynamic quota is tiered; safe rules can go higher on newer Chrome,
+// but keep a cap to avoid update failures on older/baseline environments.
+const MAX_RULES_OUT = 30000;
 
 async function fetchText(url) {
   const res = await fetch(url, {
@@ -81,6 +102,12 @@ async function main() {
 
   if (!Array.isArray(out.rules)) {
     throw new Error("Conversion did not produce an array of rules.");
+  }
+
+  if (out.rules.length > MAX_RULES_OUT) {
+    out.rules = out.rules.slice(0, MAX_RULES_OUT);
+    out.truncated = true;
+    out.truncatedTo = MAX_RULES_OUT;
   }
 
   await mkdir("docs", { recursive: true });
